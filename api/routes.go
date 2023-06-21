@@ -28,6 +28,8 @@ type User struct {
 type LikedUsers struct {
 	ID       int    `json:"user_id"`
 	Name     string `json:"user_name"`
+	Birthday int    `json:"user_birthday"`
+	Avatar   string `json:"user_avatar"`
 	LikeDate int    `json:"like_date"`
 }
 
@@ -194,10 +196,10 @@ func GetUserLikesByPostId(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
 		}
-		row := database.DB.QueryRow("SELECT id, name FROM users WHERE id = $1", userID)
+		row := database.DB.QueryRow("SELECT id, name, avatar, birthday FROM users WHERE id = $1", userID)
 
 		var user LikedUsers
-		err = row.Scan(&user.ID, &user.Name)
+		err = row.Scan(&user.ID, &user.Name, &user.Avatar, &user.Birthday)
 		if err != nil {
 			log.Println(err)
 			return
@@ -250,8 +252,8 @@ func checkPostLiked(userID int, postID int) string {
 	for rows.Next() {
 		var userIDtemp int
 		err := rows.Scan(&userIDtemp)
-		log.Println("UserID", userIDtemp)
-		log.Println("PostID", postID)
+		//log.Println("UserID", userIDtemp)
+		//log.Println("PostID", postID)
 
 		if err != nil {
 			log.Println(err)
