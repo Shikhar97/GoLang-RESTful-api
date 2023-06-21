@@ -25,9 +25,10 @@ type User struct {
 	Posts    []PostTitle `json:"posts"`
 }
 
-type Users struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
+type LikedUsers struct {
+	ID       int    `json:"user_id"`
+	Name     string `json:"user_name"`
+	LikeDate int    `json:"like_date"`
 }
 
 type Post struct {
@@ -170,7 +171,7 @@ func GetUserLikesByPostId(w http.ResponseWriter, r *http.Request) {
 	limit := pageSizeInt
 
 	rows, err := database.DB.Query(
-		"SELECT user_id FROM likes WHERE post_id = $1 ORDER BY user_id OFFSET $2 LIMIT $3", postID, offset, limit)
+		"SELECT user_id, like_date FROM likes WHERE post_id = $1 ORDER BY user_id OFFSET $2 LIMIT $3", postID, offset, limit)
 	if err != nil {
 		log.Println(err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -183,20 +184,26 @@ func GetUserLikesByPostId(w http.ResponseWriter, r *http.Request) {
 		}
 	}(rows)
 
-	var users []Users
+	var users []LikedUsers
 	for rows.Next() {
 		var userID int
-		err := rows.Scan(&userID)
+		var likeDate int
+		err := rows.Scan(&userID, &likeDate)
 		if err != nil {
 			log.Println(err)
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
 		}
+		row := database.DB.QueryRow("SELECT id, name FROM users WHERE id = $1", userID)
 
-		user := getUser(userID)
-		if user != nil {
-			users = append(users, *user)
+		var user LikedUsers
+		err = row.Scan(&user.ID, &user.Name)
+		if err != nil {
+			log.Println(err)
+			return
 		}
+		user.LikeDate = likeDate
+		users = append(users, user)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -218,7 +225,7 @@ func GetUserById(w http.ResponseWriter, r *http.Request) {
 		log.Println(err)
 		return
 	}
-	user.Posts = getUserPosts(userIDint)
+	user.Posts = getUserLatestPosts(userIDint)
 
 	w.Header().Set("Content-Type", "application/json")
 	err = json.NewEncoder(w).Encode(user)
@@ -255,20 +262,7 @@ func checkPostLiked(userID int, postID int) string {
 	return "false"
 }
 
-func getUser(userID int) *Users {
-	row := database.DB.QueryRow("SELECT id, name FROM users WHERE id = $1", userID)
-
-	var user Users
-	err := row.Scan(&user.ID, &user.Name)
-	if err != nil {
-		log.Println(err)
-		return nil
-	}
-
-	return &user
-}
-
-func getUserPosts(userID int) []PostTitle {
+func getUserLatestPosts(userID int) []PostTitle {
 	rows, err := database.DB.Query("SELECT id, title, post_date FROM posts WHERE author_id = $1 ORDER BY post_date DESC LIMIT 5", userID)
 	if err != nil {
 		log.Println(err)
