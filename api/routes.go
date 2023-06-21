@@ -14,7 +14,6 @@ import (
 type PostTitle struct {
 	ID       int    `json:"id"`
 	Title    string `json:"title"`
-	Content  string `json:"content"`
 	PostDate int    `json:"post_date"`
 }
 
@@ -24,6 +23,11 @@ type User struct {
 	Birthday int         `json:"birthday"`
 	Avatar   string      `json:"avatar"`
 	Posts    []PostTitle `json:"posts"`
+}
+
+type Users struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
 }
 
 type Post struct {
@@ -50,7 +54,7 @@ func Mount() *chi.Mux {
 	})
 	r.Get("/posts", GetPosts)
 	r.Get("/posts/{id}", GetPostById)
-	r.Get("/posts/{id}/likes", GetPostLikes)
+	r.Get("/posts/{id}/likes", GetUserLikesByPostId)
 	r.Get("/users/{id}", GetUserById)
 
 	return r
@@ -69,11 +73,9 @@ func GetPosts(w http.ResponseWriter, r *http.Request) {
 	pageInt, _ := strconv.Atoi(page)
 	pageSizeInt, _ := strconv.Atoi(pageSize)
 
-	// Calculate offset and limit for pagination
 	offset := (pageInt - 1) * pageSizeInt
 	limit := pageSizeInt
 
-	// Execute the SQL query to fetch posts
 	rows, err := database.DB.Query("SELECT p.id, p.title, p.content, p.post_date, p.author_id, u.name AS author_name, u.birthday AS author_birthday, u.avatar AS author_avatar, COUNT(l.post_id) AS like_count "+
 		"FROM posts p "+
 		"JOIN users u ON p.author_id = u.id "+
@@ -93,7 +95,6 @@ func GetPosts(w http.ResponseWriter, r *http.Request) {
 		}
 	}(rows)
 
-	// Prepare the response
 	var posts []Post
 	for rows.Next() {
 		var post Post
@@ -104,7 +105,6 @@ func GetPosts(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
 		}
-		//post.Author = author
 		post.LikedByUser = "N/A"
 		if userID != "" {
 			userID, _ := strconv.Atoi(userID)
@@ -114,7 +114,6 @@ func GetPosts(w http.ResponseWriter, r *http.Request) {
 		posts = append(posts, post)
 	}
 
-	// Return the response as JSON
 	w.Header().Set("Content-Type", "application/json")
 	err = json.NewEncoder(w).Encode(posts)
 	if err != nil {
@@ -141,15 +140,11 @@ func GetPostById(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
-	//post.Author = author
-
 	post.LikedByUser = "N/A"
 	if userID != "" {
 		userID, _ := strconv.Atoi(userID)
 		post.LikedByUser = checkPostLiked(userID, post.ID)
 	}
-
-	// Return the response as JSON
 	w.Header().Set("Content-Type", "application/json")
 	err = json.NewEncoder(w).Encode(post)
 	if err != nil {
@@ -157,7 +152,7 @@ func GetPostById(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func GetPostLikes(w http.ResponseWriter, r *http.Request) {
+func GetUserLikesByPostId(w http.ResponseWriter, r *http.Request) {
 	postID := chi.URLParam(r, "id")
 	page := r.URL.Query().Get("page")
 	pageSize := r.URL.Query().Get("limit")
@@ -174,7 +169,6 @@ func GetPostLikes(w http.ResponseWriter, r *http.Request) {
 	offset := (pageInt - 1) * pageSizeInt
 	limit := pageSizeInt
 
-	// Execute the SQL query to fetch the likes for the post
 	rows, err := database.DB.Query(
 		"SELECT user_id FROM likes WHERE post_id = $1 ORDER BY user_id OFFSET $2 LIMIT $3", postID, offset, limit)
 	if err != nil {
@@ -189,8 +183,7 @@ func GetPostLikes(w http.ResponseWriter, r *http.Request) {
 		}
 	}(rows)
 
-	// Prepare the response
-	var likes []User
+	var users []Users
 	for rows.Next() {
 		var userID int
 		err := rows.Scan(&userID)
@@ -200,16 +193,14 @@ func GetPostLikes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Fetch the user details
-		user := getUser(string(rune(userID)))
+		user := getUser(userID)
 		if user != nil {
-			likes = append(likes, *user)
+			users = append(users, *user)
 		}
 	}
 
-	// Return the response as JSON
 	w.Header().Set("Content-Type", "application/json")
-	err = json.NewEncoder(w).Encode(likes)
+	err = json.NewEncoder(w).Encode(users)
 	if err != nil {
 		return
 	}
@@ -217,19 +208,20 @@ func GetPostLikes(w http.ResponseWriter, r *http.Request) {
 
 func GetUserById(w http.ResponseWriter, r *http.Request) {
 	userID := chi.URLParam(r, "id")
+	userIDint, _ := strconv.Atoi(userID)
 
-	// Fetch the user details
-	user := getUser(userID)
-	if user == nil {
-		http.NotFound(w, r)
+	row := database.DB.QueryRow("SELECT id, name, avatar, birthday FROM users WHERE id = $1", userID)
+
+	var user User
+	err := row.Scan(&user.ID, &user.Name, &user.Avatar, &user.Birthday)
+	if err != nil {
+		log.Println(err)
 		return
 	}
+	user.Posts = getUserPosts(userIDint)
 
-	user.Posts = getUserPosts(userID)
-
-	// Return the response as JSON
 	w.Header().Set("Content-Type", "application/json")
-	err := json.NewEncoder(w).Encode(user)
+	err = json.NewEncoder(w).Encode(user)
 	if err != nil {
 		return
 	}
@@ -248,7 +240,6 @@ func checkPostLiked(userID int, postID int) string {
 		}
 	}(rows)
 
-	//var likes []User
 	for rows.Next() {
 		var userIDtemp int
 		err := rows.Scan(&userIDtemp)
@@ -264,11 +255,11 @@ func checkPostLiked(userID int, postID int) string {
 	return "false"
 }
 
-func getUser(userID string) *User {
-	row := database.DB.QueryRow("SELECT id, name, birthday, avatar FROM users WHERE id = $1", userID)
+func getUser(userID int) *Users {
+	row := database.DB.QueryRow("SELECT id, name FROM users WHERE id = $1", userID)
 
-	var user User
-	err := row.Scan(&user.ID, &user.Name, &user.Birthday, &user.Avatar)
+	var user Users
+	err := row.Scan(&user.ID, &user.Name)
 	if err != nil {
 		log.Println(err)
 		return nil
@@ -277,8 +268,8 @@ func getUser(userID string) *User {
 	return &user
 }
 
-func getUserPosts(userID string) []PostTitle {
-	rows, err := database.DB.Query("SELECT id, title, content, post_date FROM posts WHERE author_id = $1 ORDER BY post_date DESC LIMIT 5", userID)
+func getUserPosts(userID int) []PostTitle {
+	rows, err := database.DB.Query("SELECT id, title, post_date FROM posts WHERE author_id = $1 ORDER BY post_date DESC LIMIT 5", userID)
 	if err != nil {
 		log.Println(err)
 		return nil
@@ -292,7 +283,7 @@ func getUserPosts(userID string) []PostTitle {
 	var posts []PostTitle
 	for rows.Next() {
 		var post PostTitle
-		err := rows.Scan(&post.ID, &post.Title, &post.Content, &post.PostDate)
+		err := rows.Scan(&post.ID, &post.Title, &post.PostDate)
 		if err != nil {
 			log.Println(err)
 			return nil
